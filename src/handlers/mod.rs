@@ -1,981 +1,879 @@
-use crate::db::DB;
+use crate::database::DB;
 use httpageboy::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
-// use serde_json::json; // Add for request body parsing
-mod permissions;
-mod relations;
-mod roles;
-mod services;
-mod users;
+use serde_json::json;
 
-async fn get_initialized_db() -> DB {
-  let db = DB::new().await.unwrap();
-  db
-}
-
-#[derive(Serialize)]
-struct User {
-  id: i32,
-  username: String,
-}
-
-pub fn home(_req: &Request) -> Response {
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "text/html".to_string(),
-    content: "<h1>Welcome to the Auth API</h1>".as_bytes().to_vec(),
-  }
-}
-
-// Users
-pub async fn list_users(_req: &Request) -> Response {
-  let db = DB::new().await.unwrap();
-  let users = sqlx::query_as!(User, "SELECT id, username FROM people.people")
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
-
-  let json_response = serde_json::to_string(&users).unwrap();
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json_response.as_bytes().to_vec(),
-  }
-}
-
-/*
-pub fn create_user(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<CreateUserPayload>(&req.body) {
-    Ok(payload) => {
-      // Generate a simple ID. In a real app, this would be more robust.
-      let new_id = db.list_users().len() as i32 + 1;
-      let new_user = User::new(
-        new_id,
-        payload.username,
-        payload.password_hash,
-        0, // Using 0 as a placeholder for created_at, since chrono is not explicitly allowed.
-        None,
-      );
-      db.add_user(new_user.clone());
-      Response {
-        status: StatusCode::Created.to_string(),
+// Generic response for errors
+fn error_response(status_code: StatusCode, message: &str) -> Response {
+    Response {
+        status: status_code.to_string(),
         content_type: "application/json".to_string(),
-        content: json!(new_user).to_string().as_bytes().to_vec(),
-      }
+        content: json!({ "error": message }).to_string().into_bytes(),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn get_user(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.get_user(id) {
-      Some(user) => Response {
+// Home
+pub async fn home(_req: &Request) -> Response {
+    Response {
         status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(user).to_string().as_bytes().to_vec(),
-      },
-      None => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "User not found".as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid user ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdateUserPayload {
-  username: Option<String>,
-  password_hash: Option<String>,
-  removed_at: Option<i64>,
-}
-
-pub fn update_user(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  let user_id = match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid user ID".as_bytes().to_vec(),
-      };
+        content_type: "text/html".to_string(),
+        content: "<h1>Welcome to the Auth API</h1>".as_bytes().to_vec(),
     }
-  };
+}
 
-  match serde_json::from_slice::<UpdateUserPayload>(&req.body) {
-    Ok(payload) => {
-      let mut user_to_update = match db.get_user(user_id) {
-        Some(user) => user,
-        None => {
-          return Response {
-            status: StatusCode::NotFound.to_string(),
-            content_type: "text/plain".to_string(),
-            content: "User not found".as_bytes().to_vec(),
-          };
-        }
-      };
+// User Handlers
+#[derive(Serialize, sqlx::FromRow)]
+pub struct User {
+    id: i32,
+    username: String,
+    name: String,
+}
 
-      if let Some(username) = payload.username {
-        user_to_update.username = username;
-      }
-      if let Some(password_hash) = payload.password_hash {
-        user_to_update.set_password(password_hash);
-      }
-      if let Some(removed_at) = payload.removed_at {
-        user_to_update.deactivate(removed_at);
-      }
+#[derive(Deserialize)]
+pub struct CreateUserPayload {
+    username: String,
+    password_hash: String,
+    name: String,
+    person_type: String, // N or J
+    document_type: String, // DNI, CE, or RUC
+    document_number: String,
+}
 
-      match db.update_user(user_id, user_to_update.clone()) {
+pub async fn create_user(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: CreateUserPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+
+    // Note: In a real app, you'd want to handle these enums more gracefully.
+    let person_type: people::PersonType = serde_json::from_str(&format!("\"{}\"", payload.person_type)).unwrap_or(people::PersonType::N);
+    let document_type: people::DocumentType = serde_json::from_str(&format!("\"{}\"", payload.document_type)).unwrap_or(people::DocumentType::DNI);
+
+    match sqlx::query_as::<_, User>(
+        "SELECT id, username, name FROM people.create_person($1, $2, $3, $4, $5, $6)")
+        .bind(payload.username)
+        .bind(payload.password_hash)
+        .bind(payload.name)
+        .bind(person_type)
+        .bind(document_type)
+        .bind(payload.document_number)
+        .fetch_one(db.pool())
+        .await
+    {
+        Ok(user) => Response {
+            status: StatusCode::Created.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&user).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to create user"),
+    }
+}
+
+pub async fn list_people(_req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_people()")
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(users) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&users).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch users"),
+    }
+}
+
+pub async fn get_user(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
+    };
+    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.get_person($1)")
+        .bind(id)
+        .fetch_optional(db.pool())
+        .await
+    {
+        Ok(Some(user)) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&user).unwrap(),
+        },
+        Ok(None) => error_response(StatusCode::NotFound, "User not found"),
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch user"),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct UpdateUserPayload {
+    username: Option<String>,
+    password_hash: Option<String>,
+    name: Option<String>,
+}
+
+pub async fn update_user(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
+    };
+    let payload: UpdateUserPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.update_person($1, $2, $3, $4)")
+        .bind(id)
+        .bind(payload.username)
+        .bind(payload.password_hash)
+        .bind(payload.name)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "application/json".to_string(),
-          content: json!(user_to_update).to_string().as_bytes().to_vec(),
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
         },
-        Err(e) => Response {
-          status: StatusCode::InternalServerError.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
-        },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to update user"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn delete_user(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.delete_user(id) {
-      Ok(_) => Response {
-        status: StatusCode::NoContent.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "User deleted".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid user ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-// Services
-pub fn list_services(_req: &Request) -> Response {
-  let db = get_initialized_db();
-  let services = db.list_services();
-  let json_response = json!(services).to_string();
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json_response.as_bytes().to_vec(),
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateServicePayload {
-  name: String,
-}
-
-pub fn create_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<CreateServicePayload>(&req.body) {
-    Ok(payload) => {
-      let new_id = db.list_services().len() as i32 + 1;
-      let new_service = Service::new(new_id, payload.name);
-      db.add_service(new_service.clone());
-      Response {
-        status: StatusCode::Created.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(new_service).to_string().as_bytes().to_vec(),
-      }
-    }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdateServicePayload {
-  name: Option<String>,
-}
-
-pub fn update_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  let service_id = match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid service ID".as_bytes().to_vec(),
-      };
-    }
-  };
-
-  match serde_json::from_slice::<UpdateServicePayload>(&req.body) {
-    Ok(payload) => {
-      let mut service_to_update = match db.get_service(service_id) {
-        Some(service) => service,
-        None => {
-          return Response {
-            status: StatusCode::NotFound.to_string(),
-            content_type: "text/plain".to_string(),
-            content: "Service not found".as_bytes().to_vec(),
-          };
-        }
-      };
-
-      if let Some(name) = payload.name {
-        service_to_update.set_name(name);
-      }
-
-      match db.update_service(service_id, service_to_update.clone()) {
+pub async fn delete_user(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
+    };
+    match sqlx::query("CALL people.delete_person($1)")
+        .bind(id)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "application/json".to_string(),
-          content: json!(service_to_update).to_string().as_bytes().to_vec(),
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
         },
-        Err(e) => Response {
-          status: StatusCode::InternalServerError.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete user"),
+    }
+}
+
+
+// Service Handlers
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Service {
+    id: i32,
+    name: String,
+    description: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct CreateServicePayload {
+    name: String,
+    description: Option<String>,
+}
+
+pub async fn create_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: CreateServicePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query_as::<_, Service>("SELECT * FROM services.create_service($1, $2)")
+        .bind(payload.name)
+        .bind(payload.description)
+        .fetch_one(db.pool())
+        .await
+    {
+        Ok(service) => Response {
+            status: StatusCode::Created.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&service).unwrap(),
         },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to create service"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn delete_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.delete_service(id) {
-      Ok(_) => Response {
-        status: StatusCode::NoContent.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Service deleted".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid service ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-// Roles
-pub fn list_roles(_req: &Request) -> Response {
-  let db = get_initialized_db();
-  let roles = db.list_roles();
-  let json_response = json!(roles).to_string();
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json_response.as_bytes().to_vec(),
-  }
-}
-
-pub fn get_role(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.get_role(id) {
-      Some(role) => Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(role).to_string().as_bytes().to_vec(),
-      },
-      None => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Role not found".as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid role ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreateRolePayload {
-  name: String,
-}
-
-pub fn create_role(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<CreateRolePayload>(&req.body) {
-    Ok(payload) => {
-      let new_id = db.list_roles().len() as i32 + 1;
-      let new_role = Role::new(new_id, payload.name);
-      db.add_role(new_role.clone());
-      Response {
-        status: StatusCode::Created.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(new_role).to_string().as_bytes().to_vec(),
-      }
+pub async fn list_services(_req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    match sqlx::query_as::<_, Service>("SELECT * FROM services.list_services()")
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(services) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&services).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch services"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdateRolePayload {
-  name: Option<String>,
+#[derive(Deserialize)]
+pub struct UpdateServicePayload {
+    name: Option<String>,
+    description: Option<String>,
 }
 
-pub fn update_role(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  let role_id = match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid role ID".as_bytes().to_vec(),
-      };
-    }
-  };
-
-  match serde_json::from_slice::<UpdateRolePayload>(&req.body) {
-    Ok(payload) => {
-      let mut role_to_update = match db.get_role(role_id) {
-        Some(role) => role,
-        None => {
-          return Response {
-            status: StatusCode::NotFound.to_string(),
-            content_type: "text/plain".to_string(),
-            content: "Role not found".as_bytes().to_vec(),
-          };
-        }
-      };
-
-      if let Some(name) = payload.name {
-        role_to_update.set_name(name);
-      }
-
-      match db.update_role(role_id, role_to_update.clone()) {
+pub async fn update_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
+    };
+    let payload: UpdateServicePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL services.update_service($1, $2, $3)")
+        .bind(id)
+        .bind(payload.name)
+        .bind(payload.description)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "application/json".to_string(),
-          content: json!(role_to_update).to_string().as_bytes().to_vec(),
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
         },
-        Err(e) => Response {
-          status: StatusCode::InternalServerError.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
-        },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to update service"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn delete_role(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.delete_role(id) {
-      Ok(_) => Response {
-        status: StatusCode::NoContent.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Role deleted".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid role ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-// Permissions
-pub fn list_permissions(_req: &Request) -> Response {
-  let db = get_initialized_db();
-  let permissions = db.list_permissions();
-  let json_response = json!(permissions).to_string();
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json_response.as_bytes().to_vec(),
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CreatePermissionPayload {
-  name: String,
-}
-
-pub fn create_permission(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<CreatePermissionPayload>(&req.body) {
-    Ok(payload) => {
-      let new_id = db.list_permissions().len() as i32 + 1;
-      let new_permission = Permission::new(new_id, payload.name);
-      db.add_permission(new_permission.clone());
-      Response {
-        status: StatusCode::Created.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(new_permission).to_string().as_bytes().to_vec(),
-      }
-    }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct UpdatePermissionPayload {
-  name: Option<String>,
-}
-
-pub fn update_permission(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  let permission_id = match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid permission ID".as_bytes().to_vec(),
-      };
-    }
-  };
-
-  match serde_json::from_slice::<UpdatePermissionPayload>(&req.body) {
-    Ok(payload) => {
-      let mut permission_to_update = match db.get_permission(permission_id) {
-        Some(permission) => permission,
-        None => {
-          return Response {
-            status: StatusCode::NotFound.to_string(),
-            content_type: "text/plain".to_string(),
-            content: "Permission not found".as_bytes().to_vec(),
-          };
-        }
-      };
-
-      if let Some(name) = payload.name {
-        permission_to_update.set_name(name);
-      }
-
-      match db.update_permission(permission_id, permission_to_update.clone()) {
+pub async fn delete_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
+    };
+    match sqlx::query("CALL services.delete_service($1)")
+        .bind(id)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "application/json".to_string(),
-          content: json!(permission_to_update).to_string().as_bytes().to_vec(),
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
         },
-        Err(e) => Response {
-          status: StatusCode::InternalServerError.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete service"),
+    }
+}
+
+
+// Role Handlers
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Role {
+    id: i32,
+    name: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreateRolePayload {
+    name: String,
+}
+
+pub async fn create_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: CreateRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query_as::<_, Role>("SELECT * FROM people.create_role($1)")
+        .bind(payload.name)
+        .fetch_one(db.pool())
+        .await
+    {
+        Ok(role) => Response {
+            status: StatusCode::Created.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&role).unwrap(),
         },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to create role"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn delete_permission(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => match db.delete_permission(id) {
-      Ok(_) => Response {
-        status: StatusCode::NoContent.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Permission deleted".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid permission ID".as_bytes().to_vec(),
-    },
-  }
-}
-
-// Role-Permissions
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RolePermissionPayload {
-  role_id: i32,
-  permission_id: i32,
-}
-
-pub fn assign_permission_to_role(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<RolePermissionPayload>(&req.body) {
-    Ok(payload) => match db.assign_permission_to_role(payload.role_id, payload.permission_id) {
-      Ok(_) => Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Permission assigned to role".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::Conflict.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-pub fn remove_permission_from_role(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<RolePermissionPayload>(&req.body) {
-    Ok(payload) => match db.remove_permission_from_role(payload.role_id, payload.permission_id) {
-      Ok(_) => Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Permission removed from role".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-pub fn list_role_permissions(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(role_id) => {
-      let permissions = db.list_permissions_for_role(role_id);
-      Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(permissions).to_string().as_bytes().to_vec(),
-      }
+pub async fn list_roles(_req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    match sqlx::query_as::<_, Role>("SELECT * FROM people.list_roles()")
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(roles) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&roles).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch roles"),
     }
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid role ID".as_bytes().to_vec(),
-    },
-  }
 }
 
-// Service-Roles
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct ServiceRolePayload {
-  service_id: i32,
-  role_id: i32,
-}
-
-pub fn assign_role_to_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<ServiceRolePayload>(&req.body) {
-    Ok(payload) => match db.assign_role_to_service(payload.service_id, payload.role_id) {
-      Ok(_) => Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Role assigned to service".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::Conflict.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-pub fn remove_role_from_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<ServiceRolePayload>(&req.body) {
-    Ok(payload) => match db.remove_role_from_service(payload.service_id, payload.role_id) {
-      Ok(_) => Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Role removed from service".as_bytes().to_vec(),
-      },
-      Err(e) => Response {
-        status: StatusCode::NotFound.to_string(),
-        content_type: "text/plain".to_string(),
-        content: e.as_bytes().to_vec(),
-      },
-    },
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
-}
-
-pub fn list_service_roles(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match req
-    .params
-    .get("id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(service_id) => {
-      let roles = db.list_roles_for_service(service_id);
-      Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(roles).to_string().as_bytes().to_vec(),
-      }
+pub async fn get_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
+    };
+    match sqlx::query_as::<_, Role>("SELECT * FROM people.get_role($1)")
+        .bind(id)
+        .fetch_optional(db.pool())
+        .await
+    {
+        Ok(Some(role)) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&role).unwrap(),
+        },
+        Ok(None) => error_response(StatusCode::NotFound, "Role not found"),
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch role"),
     }
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid service ID".as_bytes().to_vec(),
-    },
-  }
 }
 
-// Person-Service-Roles
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct PersonServiceRolePayload {
-  person_id: i32,
-  service_id: i32,
-  role_id: i32,
+#[derive(Deserialize)]
+pub struct UpdateRolePayload {
+    name: String,
 }
 
-pub fn assign_role_to_person_in_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<PersonServiceRolePayload>(&req.body) {
-    Ok(payload) => {
-      match db.assign_role_to_person_in_service(
-        payload.person_id,
-        payload.service_id,
-        payload.role_id,
-      ) {
+pub async fn update_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
+    };
+    let payload: UpdateRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.update_role($1, $2)")
+        .bind(id)
+        .bind(payload.name)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "text/plain".to_string(),
-          content: "Role assigned to person in service".as_bytes().to_vec(),
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
         },
-        Err(e) => Response {
-          status: StatusCode::Conflict.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
-        },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to update role"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn remove_role_from_person_in_service(req: &Request) -> Response {
-  let mut db = get_initialized_db();
-  match serde_json::from_slice::<PersonServiceRolePayload>(&req.body) {
-    Ok(payload) => {
-      match db.remove_role_from_person_in_service(
-        payload.person_id,
-        payload.service_id,
-        payload.role_id,
-      ) {
+pub async fn delete_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
+    };
+    match sqlx::query("CALL people.delete_role($1)")
+        .bind(id)
+        .execute(db.pool())
+        .await
+    {
         Ok(_) => Response {
-          status: StatusCode::Ok.to_string(),
-          content_type: "text/plain".to_string(),
-          content: "Role removed from person in service".as_bytes().to_vec(),
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
         },
-        Err(e) => Response {
-          status: StatusCode::NotFound.to_string(),
-          content_type: "text/plain".to_string(),
-          content: e.as_bytes().to_vec(),
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete role"),
+    }
+}
+
+
+// Permission Handlers
+#[derive(Serialize, sqlx::FromRow)]
+pub struct Permission {
+    id: i32,
+    name: String,
+}
+
+#[derive(Deserialize)]
+pub struct CreatePermissionPayload {
+    name: String,
+}
+
+pub async fn create_permission(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: CreatePermissionPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query_as::<_, Permission>("SELECT * FROM people.create_permission($1)")
+        .bind(payload.name)
+        .fetch_one(db.pool())
+        .await
+    {
+        Ok(permission) => Response {
+            status: StatusCode::Created.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&permission).unwrap(),
         },
-      }
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to create permission"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn list_person_roles_in_service(req: &Request) -> Response {
-  let db = get_initialized_db();
-  let person_id = match req
-    .params
-    .get("person_id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid person ID".as_bytes().to_vec(),
-      };
+pub async fn list_permissions(_req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    match sqlx::query_as::<_, Permission>("SELECT * FROM people.list_permissions()")
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(permissions) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&permissions).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch permissions"),
     }
-  };
-  let service_id = match req
-    .params
-    .get("service_id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid service ID".as_bytes().to_vec(),
-      };
-    }
-  };
-
-  let roles = db.list_person_roles_in_service(person_id, service_id);
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json!(roles).to_string().as_bytes().to_vec(),
-  }
 }
 
-pub fn list_persons_with_role_in_service(req: &Request) -> Response {
-  let db = get_initialized_db();
-  let service_id = match req
-    .params
-    .get("service_id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid service ID".as_bytes().to_vec(),
-      };
-    }
-  };
-  let role_id = match req
-    .params
-    .get("role_id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(id) => id,
-    None => {
-      return Response {
-        status: StatusCode::BadRequest.to_string(),
-        content_type: "text/plain".to_string(),
-        content: "Invalid role ID".as_bytes().to_vec(),
-      };
-    }
-  };
-
-  let persons = db.list_persons_with_role_in_service(service_id, role_id);
-  Response {
-    status: StatusCode::Ok.to_string(),
-    content_type: "application/json".to_string(),
-    content: json!(persons).to_string().as_bytes().to_vec(),
-  }
+#[derive(Deserialize)]
+pub struct UpdatePermissionPayload {
+    name: String,
 }
 
-// Other checks
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct CheckPermissionPayload {
-  person_id: i32,
-  service_id: i32,
-  permission_id: i32,
+pub async fn update_permission(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid permission ID"),
+    };
+    let payload: UpdatePermissionPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.update_permission($1, $2)")
+        .bind(id)
+        .bind(payload.name)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to update permission"),
+    }
 }
 
-pub fn check_person_permission_in_service(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match serde_json::from_slice::<CheckPermissionPayload>(&req.body) {
-    Ok(payload) => {
-      let has_permission = db.check_person_permission_in_service(
-        payload.person_id,
-        payload.service_id,
-        payload.permission_id,
-      );
-      Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!({"has_permission": has_permission})
-          .to_string()
-          .as_bytes()
-          .to_vec(),
-      }
+pub async fn delete_permission(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid permission ID"),
+    };
+    match sqlx::query("CALL people.delete_permission($1)")
+        .bind(id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete permission"),
     }
-    Err(e) => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: format!("Failed to parse request body: {}", e)
-        .as_bytes()
-        .to_vec(),
-    },
-  }
 }
 
-pub fn list_services_of_person(req: &Request) -> Response {
-  let db = get_initialized_db();
-  match req
-    .params
-    .get("person_id")
-    .and_then(|id_str| id_str.parse::<i32>().ok())
-  {
-    Some(person_id) => {
-      let services = db.list_services_of_person(person_id);
-      Response {
-        status: StatusCode::Ok.to_string(),
-        content_type: "application/json".to_string(),
-        content: json!(services).to_string().as_bytes().to_vec(),
-      }
-    }
-    None => Response {
-      status: StatusCode::BadRequest.to_string(),
-      content_type: "text/plain".to_string(),
-      content: "Invalid person ID".as_bytes().to_vec(),
-    },
-  }
+
+// Relationship Handlers
+#[derive(Deserialize)]
+pub struct RolePermissionPayload {
+    role_id: i32,
+    permission_id: i32,
 }
-*/
+
+pub async fn assign_permission_to_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: RolePermissionPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.assign_permission_to_role($1, $2)")
+        .bind(payload.role_id)
+        .bind(payload.permission_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to assign permission to role"),
+    }
+}
+
+pub async fn remove_permission_from_role(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: RolePermissionPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.remove_permission_from_role($1, $2)")
+        .bind(payload.role_id)
+        .bind(payload.permission_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to remove permission from role"),
+    }
+}
+
+pub async fn list_role_permissions(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
+    };
+    match sqlx::query_as::<_, Permission>("SELECT * FROM people.list_role_permissions($1)")
+        .bind(id)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(permissions) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&permissions).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch role permissions"),
+    }
+}
+
+
+#[derive(Deserialize)]
+pub struct ServiceRolePayload {
+    service_id: i32,
+    role_id: i32,
+}
+
+pub async fn assign_role_to_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: ServiceRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL services.assign_role_to_service($1, $2)")
+        .bind(payload.service_id)
+        .bind(payload.role_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to assign role to service"),
+    }
+}
+
+pub async fn remove_role_from_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: ServiceRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL services.remove_role_from_service($1, $2)")
+        .bind(payload.service_id)
+        .bind(payload.role_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to remove role from service"),
+    }
+}
+
+pub async fn list_service_roles(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let id: i32 = match req.params.get("id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
+    };
+    match sqlx::query_as::<_, Role>("SELECT * FROM services.list_service_roles($1)")
+        .bind(id)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(roles) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&roles).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch service roles"),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct PersonServiceRolePayload {
+    person_id: i32,
+    service_id: i32,
+    role_id: i32,
+}
+
+pub async fn assign_role_to_person_in_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: PersonServiceRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.assign_role_to_person_in_service($1, $2, $3)")
+        .bind(payload.person_id)
+        .bind(payload.service_id)
+        .bind(payload.role_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "status": "success" }).to_string().into_bytes(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to assign role to person in service"),
+    }
+}
+
+pub async fn remove_role_from_person_in_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: PersonServiceRolePayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query("CALL people.remove_role_from_person_in_service($1, $2, $3)")
+        .bind(payload.person_id)
+        .bind(payload.service_id)
+        .bind(payload.role_id)
+        .execute(db.pool())
+        .await
+    {
+        Ok(_) => Response {
+            status: StatusCode::NoContent.to_string(),
+            content_type: "application/json".to_string(),
+            content: Vec::new(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to remove role from person in service"),
+    }
+}
+
+pub async fn list_person_roles_in_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let person_id: i32 = match req.params.get("person_id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid person ID"),
+    };
+    let service_id: i32 = match req.params.get("service_id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
+    };
+    match sqlx::query_as::<_, Role>("SELECT * FROM people.list_person_roles_in_service($1, $2)")
+        .bind(person_id)
+        .bind(service_id)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(roles) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&roles).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch person roles in service"),
+    }
+}
+
+pub async fn list_persons_with_role_in_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let service_id: i32 = match req.params.get("service_id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
+    };
+    let role_id: i32 = match req.params.get("role_id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
+    };
+    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_persons_with_role_in_service($1, $2)")
+        .bind(service_id)
+        .bind(role_id)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(users) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&users).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch persons with role in service"),
+    }
+}
+
+#[derive(Deserialize)]
+pub struct CheckPermissionPayload {
+    person_id: i32,
+    service_id: i32,
+    permission_name: String,
+}
+
+pub async fn check_person_permission_in_service(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let payload: CheckPermissionPayload = match serde_json::from_slice(req.body.as_bytes()) {
+        Ok(p) => p,
+        Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
+    };
+    match sqlx::query_scalar::<_, bool>("SELECT * FROM people.check_person_permission_in_service($1, $2, $3)")
+        .bind(payload.person_id)
+        .bind(payload.service_id)
+        .bind(payload.permission_name)
+        .fetch_one(db.pool())
+        .await
+    {
+        Ok(has_permission) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: json!({ "has_permission": has_permission }).to_string().into_bytes(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to check permission"),
+    }
+}
+
+pub async fn list_services_of_person(req: &Request) -> Response {
+    let db = match DB::new().await {
+        Ok(db) => db,
+        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+    };
+    let person_id: i32 = match req.params.get("person_id").and_then(|s| s.parse().ok()) {
+        Some(id) => id,
+        None => return error_response(StatusCode::BadRequest, "Invalid person ID"),
+    };
+    match sqlx::query_as::<_, Service>("SELECT id, name, NULL as description FROM people.list_services_of_person($1)")
+        .bind(person_id)
+        .fetch_all(db.pool())
+        .await
+    {
+        Ok(services) => Response {
+            status: StatusCode::Ok.to_string(),
+            content_type: "application/json".to_string(),
+            content: serde_json::to_vec(&services).unwrap(),
+        },
+        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch services of person"),
+    }
+}
+
+// These are needed for the create_person handler to deserialize the enums
+mod people {
+    use serde::Deserialize;
+    #[derive(Debug, Deserialize, sqlx::Type)]
+    #[sqlx(type_name = "person_type", rename_all = "UPPERCASE")]
+    pub enum PersonType {
+        N,
+        J,
+    }
+
+    #[derive(Debug, Deserialize, sqlx::Type)]
+    #[sqlx(type_name = "document_type", rename_all = "UPPERCASE")]
+    pub enum DocumentType {
+        DNI,
+        CE,
+        RUC,
+    }
+}
