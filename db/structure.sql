@@ -1,68 +1,71 @@
-\c postgres
-DROP DATABASE IF EXISTS auth_api;
-CREATE DATABASE auth_api;
-\c auth_api
+-- Main Schema for the Authentication and Authorization API
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- People Schema (Users)
+-- Based on the user's provided schema, adapted for authentication.
+CREATE SCHEMA IF NOT EXISTS people;
 
-DROP SCHEMA IF EXISTS people CASCADE;
-CREATE SCHEMA people;
+CREATE TYPE people.document_type AS ENUM ('DNI', 'CE', 'RUC');
+CREATE TYPE people.person_type AS ENUM ('N', 'J');
 
-DROP TYPE IF EXISTS people.document_type CASCADE;
-CREATE TYPE people.document_type AS ENUM ('DNI','CE','RUC');
+CREATE TABLE people.person (
+  id SERIAL PRIMARY KEY,
+  username TEXT NOT NULL UNIQUE, -- Added for authentication
+  password_hash TEXT NOT NULL, -- Added for authentication
+  name TEXT NOT NULL,
+  person_type people.person_type NOT NULL DEFAULT 'N',
+  document_type people.document_type NOT NULL DEFAULT 'DNI',
+  document_number TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  removed_at TIMESTAMPTZ,
+  UNIQUE (document_type, document_number)
+);
 
-DROP TYPE IF EXISTS people.person_type CASCADE;
-CREATE TYPE people.person_type AS ENUM ('N','J');
-
-DROP TABLE IF EXISTS services;
-CREATE TABLE services (
+-- Roles Schema (as provided by user)
+CREATE TABLE people.role (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
-DROP TABLE IF EXISTS people.permissions;
-CREATE TABLE people.permissions (
-  id SERIAL PRIMARY KEY,
-  name TEXT NOT NULL DEFAULT '' UNIQUE
-);
-
-DROP TABLE IF EXISTS people.roles;
-CREATE TABLE people.roles (
+-- Permissions Schema (as provided by user)
+CREATE TABLE people.permission (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
-DROP TABLE IF EXISTS people.role_permissions;
-CREATE TABLE people.role_permissions (
-  role_id INTEGER NOT NULL REFERENCES people.roles(id) ON DELETE CASCADE,
-  permission_id INTEGER NOT NULL REFERENCES people.permissions(id) ON DELETE CASCADE,
-  PRIMARY KEY (role_id, permission_id)
-);
+-- Services Schema (new, as required by API)
+CREATE SCHEMA IF NOT EXISTS services;
 
-DROP TABLE IF EXISTS people.people;
-CREATE TABLE people.people (
+CREATE TABLE services.services (
   id SERIAL PRIMARY KEY,
-  username TEXT NOT NULL UNIQUE,
-  password_hash TEXT NOT NULL,
-  created_at BIGINT NOT NULL DEFAULT (EXTRACT(EPOCH FROM NOW())::BIGINT),
-  removed_at BIGINT DEFAULT NULL
+  name TEXT NOT NULL UNIQUE,
+  description TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  status BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-DROP TABLE IF EXISTS people.service_roles;
-CREATE TABLE people.service_roles (
-  service_id INTEGER NOT NULL REFERENCES services(id) ON DELETE CASCADE,
-  role_id INTEGER NOT NULL REFERENCES people.roles(id) ON DELETE CASCADE,
-  PRIMARY KEY (service_id, role_id)
+-- Linking Tables
+
+-- Role-Permissions (based on user schema, corrected reference)
+CREATE TABLE people.role_permission (
+  id SERIAL PRIMARY KEY,
+  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
+  permission_id INTEGER REFERENCES people.permission(id) ON DELETE CASCADE NOT NULL,
+  UNIQUE (role_id, permission_id)
 );
 
-DROP TABLE IF EXISTS people.person_service_roles;
-CREATE TABLE people.person_service_roles (
-  person_id   INTEGER NOT NULL
-    REFERENCES people.people(id) ON DELETE CASCADE,
-  service_id  INTEGER NOT NULL,
-  role_id     INTEGER NOT NULL,
-  PRIMARY KEY (person_id, service_id, role_id),
-  FOREIGN KEY (service_id, role_id)
-    REFERENCES people.service_roles(service_id, role_id)
-    ON DELETE CASCADE
+-- Service-Roles (new, as required by API)
+CREATE TABLE services.service_roles (
+  id SERIAL PRIMARY KEY,
+  service_id INTEGER REFERENCES services.services(id) ON DELETE CASCADE NOT NULL,
+  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
+  UNIQUE (service_id, role_id)
+);
+
+-- Person-Service-Roles (new, as required by API, replaces user's person_role)
+CREATE TABLE people.person_service_role (
+  id SERIAL PRIMARY KEY,
+  person_id INTEGER REFERENCES people.person(id) ON DELETE CASCADE NOT NULL,
+  service_id INTEGER REFERENCES services.services(id) ON DELETE CASCADE NOT NULL,
+  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
+  UNIQUE (person_id, service_id, role_id)
 );
