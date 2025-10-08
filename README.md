@@ -60,3 +60,38 @@ Copyright (c) 2025
 
 This project is licensed under the [MIT License](https://opensource.org/licenses/MIT).
 
+## Endpoints
+
+| Method | Path                                      | Description                                |
+|--------|-------------------------------------------|--------------------------------------------|
+| GET    | /                                         | Home                                       |
+| GET    | /users                                    | List all users                             |
+| POST   | /users                                    | Create a new user                          |
+| GET    | /users/{id}                               | Get a user by ID                           |
+| PUT    | /users/{id}                               | Update a user by ID                        |
+| DELETE | /users/{id}                               | Delete a user by ID                        |
+| GET    | /services                                 | List all services                          |
+| POST   | /services                                 | Create a new service                       |
+| PUT    | /services/{id}                            | Update a service by ID                     |
+| DELETE | /services/{id}                            | Delete a service by ID                     |
+| GET    | /roles                                    | List all roles                             |
+| POST   | /roles                                    | Create a new role                          |
+| GET    | /roles/{id}                               | Get a role by ID                           |
+| PUT    | /roles/{id}                               | Update a role by ID                        |
+| DELETE | /roles/{id}                               | Delete a role by ID                        |
+| GET    | /permissions                              | List all permissions                       |
+| POST   | /permissions                              | Create a new permission                    |
+| PUT    | /permissions/{id}                         | Update a permission by ID                  |
+| DELETE | /permissions/{id}                         | Delete a permission by ID                  |
+| POST   | /role-permissions                         | Assign a permission to a role              |
+| DELETE | /role-permissions                         | Remove a permission from a role            |
+| GET    | /roles/{id}/permissions                   | List all permissions for a role            |
+| POST   | /service-roles                            | Assign a role to a service                 |
+| DELETE | /service-roles                            | Remove a role from a service               |
+| GET    | /services/{id}/roles                      | List all roles for a service               |
+| POST   | /person-service-roles                     | Assign a role to a person in a service     |
+| DELETE | /person-service-roles                     | Remove a role from a person in a service   |
+| GET    | /people/{person_id}/services/{service_id}/roles | List all roles for a person in a service   |
+| GET    | /services/{service_id}/roles/{role_id}/people | List all people with a role in a service |
+| GET    | /check-permission                         | Check if a person has a permission         |
+| GET    | /people/{person_id}/services              | List all services for a person             |
