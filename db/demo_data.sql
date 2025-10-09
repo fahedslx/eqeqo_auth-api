@@ -4,14 +4,14 @@ VALUES
   ('Service B'),
   ('Service C');
 
-INSERT INTO people.roles (name)
+INSERT INTO auth.roles (name)
 VALUES
   ('Admin'),
   ('User'),
   ('Editor'),
   ('Viewer');
 
-INSERT INTO people.permissions (name)
+INSERT INTO auth.permissions (name)
 VALUES
   ('read'),
   ('write'),
@@ -19,7 +19,7 @@ VALUES
   ('delete'),
   ('share');
 
-INSERT INTO people.people (username, password_hash)
+INSERT INTO auth.people (username, password_hash)
 VALUES
   ('adm1', crypt('adm1', gen_salt('bf'))),
   ('usr1', crypt('usr1', gen_salt('bf'))),
@@ -28,7 +28,7 @@ VALUES
   ('editor1', crypt('editor1', gen_salt('bf'))),
   ('viewer1', crypt('viewer1', gen_salt('bf')));
 
-INSERT INTO people.role_permissions (role_id, permission_id)
+INSERT INTO auth.role_permissions (role_id, permission_id)
 VALUES
   (1, 1),
   (1, 2),
@@ -38,14 +38,14 @@ VALUES
   (3, 5),
   (4, 6);
 
-INSERT INTO people.service_roles (service_id, role_id)
+INSERT INTO auth.service_roles (service_id, role_id)
 VALUES
   (1, 1),
   (1, 2),
   (2, 2),
   (3, 3);
 
-INSERT INTO people.person_service_roles (person_id, service_id, role_id)
+INSERT INTO auth.person_service_roles (person_id, service_id, role_id)
 VALUES
   (1, 1, 1),
   (2, 1, 2),

@@ -1,50 +1,50 @@
 -- Procedures for People (Users, Roles, Permissions)
 
 -- Function to create a person and return their basic info
-CREATE OR REPLACE FUNCTION people.create_person(
+CREATE OR REPLACE FUNCTION auth.create_person(
     p_username TEXT,
     p_password_hash TEXT,
     p_name TEXT,
-    p_person_type people.person_type,
-    p_document_type people.document_type,
+    p_person_type auth.person_type,
+    p_document_type auth.document_type,
     p_document_number TEXT
 )
 RETURNS TABLE(id INT, username TEXT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO people.person (username, password_hash, name, person_type, document_type, document_number)
+    INSERT INTO auth.person (username, password_hash, name, person_type, document_type, document_number)
     VALUES (p_username, p_password_hash, p_name, p_person_type, p_document_type, p_document_number)
-    RETURNING people.person.id, people.person.username, people.person.name;
+    RETURNING auth.person.id, auth.person.username, auth.person.name;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Function to list all people
-CREATE OR REPLACE FUNCTION people.list_people()
+CREATE OR REPLACE FUNCTION auth.list_people()
 RETURNS TABLE(id INT, username TEXT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.id, p.username, p.name FROM people.person p WHERE p.removed_at IS NULL;
+    SELECT p.id, p.username, p.name FROM auth.person p WHERE p.removed_at IS NULL;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Function to get a single person by ID
-CREATE OR REPLACE FUNCTION people.get_person(p_id INT)
+CREATE OR REPLACE FUNCTION auth.get_person(p_id INT)
 RETURNS TABLE(id INT, username TEXT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.id, p.username, p.name FROM people.person p WHERE p.id = p_id AND p.removed_at IS NULL;
+    SELECT p.id, p.username, p.name FROM auth.person p WHERE p.id = p_id AND p.removed_at IS NULL;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Procedure to update a person
-CREATE OR REPLACE PROCEDURE people.update_person(
+CREATE OR REPLACE PROCEDURE auth.update_person(
     p_id INT,
     p_username TEXT,
     p_password_hash TEXT,
     p_name TEXT
 ) AS $$
 BEGIN
-    UPDATE people.person
+    UPDATE auth.person
     SET
         username = COALESCE(p_username, username),
         password_hash = COALESCE(p_password_hash, password_hash),
@@ -54,102 +54,102 @@ END;
 $$ LANGUAGE plpgsql;
 
 -- Procedure to delete a person (soft delete)
-CREATE OR REPLACE PROCEDURE people.delete_person(p_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.delete_person(p_id INT) AS $$
 BEGIN
-    UPDATE people.person
+    UPDATE auth.person
     SET removed_at = EXTRACT(EPOCH FROM NOW())::BIGINT
     WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Functions for Roles
-CREATE OR REPLACE FUNCTION people.create_role(p_name TEXT)
+CREATE OR REPLACE FUNCTION auth.create_role(p_name TEXT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO people.role (name) VALUES (p_name) RETURNING people.role.id, people.role.name;
+    INSERT INTO auth.role (name) VALUES (p_name) RETURNING auth.role.id, auth.role.name;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_roles()
+CREATE OR REPLACE FUNCTION auth.list_roles()
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.id, r.name FROM people.role r;
+    SELECT r.id, r.name FROM auth.role r;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.get_role(p_id INT)
+CREATE OR REPLACE FUNCTION auth.get_role(p_id INT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.id, r.name FROM people.role r WHERE r.id = p_id;
+    SELECT r.id, r.name FROM auth.role r WHERE r.id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.update_role(p_id INT, p_name TEXT) AS $$
+CREATE OR REPLACE PROCEDURE auth.update_role(p_id INT, p_name TEXT) AS $$
 BEGIN
-    UPDATE people.role SET name = p_name WHERE id = p_id;
+    UPDATE auth.role SET name = p_name WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.delete_role(p_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.delete_role(p_id INT) AS $$
 BEGIN
-    DELETE FROM people.role WHERE id = p_id;
+    DELETE FROM auth.role WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
 
 -- Functions for Permissions
-CREATE OR REPLACE FUNCTION people.create_permission(p_name TEXT)
+CREATE OR REPLACE FUNCTION auth.create_permission(p_name TEXT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO people.permission (name) VALUES (p_name) RETURNING people.permission.id, people.permission.name;
+    INSERT INTO auth.permission (name) VALUES (p_name) RETURNING auth.permission.id, auth.permission.name;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_permissions()
+CREATE OR REPLACE FUNCTION auth.list_permissions()
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.id, p.name FROM people.permission p;
+    SELECT p.id, p.name FROM auth.permission p;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.update_permission(p_id INT, p_name TEXT) AS $$
+CREATE OR REPLACE PROCEDURE auth.update_permission(p_id INT, p_name TEXT) AS $$
 BEGIN
-    UPDATE people.permission SET name = p_name WHERE id = p_id;
+    UPDATE auth.permission SET name = p_name WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.delete_permission(p_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.delete_permission(p_id INT) AS $$
 BEGIN
-    DELETE FROM people.permission WHERE id = p_id;
+    DELETE FROM auth.permission WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
 -- Procedures for Services
-CREATE OR REPLACE FUNCTION services.create_service(p_name TEXT, p_description TEXT)
+CREATE OR REPLACE FUNCTION auth.create_service(p_name TEXT, p_description TEXT)
 RETURNS TABLE(id INT, name TEXT, description TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO services.services (name, description) VALUES (p_name, p_description)
-    RETURNING services.services.id, services.services.name, services.services.description;
+    INSERT INTO auth.services (name, description) VALUES (p_name, p_description)
+    RETURNING auth.services.id, auth.services.name, auth.services.description;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION services.list_services()
+CREATE OR REPLACE FUNCTION auth.list_services()
 RETURNS TABLE(id INT, name TEXT, description TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT s.id, s.name, s.description FROM services.services s WHERE s.status = TRUE;
+    SELECT s.id, s.name, s.description FROM auth.services s WHERE s.status = TRUE;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE services.update_service(p_id INT, p_name TEXT, p_description TEXT) AS $$
+CREATE OR REPLACE PROCEDURE auth.update_service(p_id INT, p_name TEXT, p_description TEXT) AS $$
 BEGIN
-    UPDATE services.services
+    UPDATE auth.services
     SET
         name = COALESCE(p_name, name),
         description = COALESCE(p_description, description)
@@ -157,101 +157,101 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE services.delete_service(p_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.delete_service(p_id INT) AS $$
 BEGIN
-    UPDATE services.services SET status = FALSE WHERE id = p_id;
+    UPDATE auth.services SET status = FALSE WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
 
 -- Relationship Management Procedures
-CREATE OR REPLACE PROCEDURE people.assign_permission_to_role(p_role_id INT, p_permission_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.assign_permission_to_role(p_role_id INT, p_permission_id INT) AS $$
 BEGIN
-    INSERT INTO people.role_permission (role_id, permission_id) VALUES (p_role_id, p_permission_id);
+    INSERT INTO auth.role_permission (role_id, permission_id) VALUES (p_role_id, p_permission_id);
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.remove_permission_from_role(p_role_id INT, p_permission_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.remove_permission_from_role(p_role_id INT, p_permission_id INT) AS $$
 BEGIN
-    DELETE FROM people.role_permission WHERE role_id = p_role_id AND permission_id = p_permission_id;
+    DELETE FROM auth.role_permission WHERE role_id = p_role_id AND permission_id = p_permission_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_role_permissions(p_role_id INT)
+CREATE OR REPLACE FUNCTION auth.list_role_permissions(p_role_id INT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.id, p.name FROM people.permission p
-    JOIN people.role_permission rp ON p.id = rp.permission_id
+    SELECT p.id, p.name FROM auth.permission p
+    JOIN auth.role_permission rp ON p.id = rp.permission_id
     WHERE rp.role_id = p_role_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE services.assign_role_to_service(p_service_id INT, p_role_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.assign_role_to_service(p_service_id INT, p_role_id INT) AS $$
 BEGIN
-    INSERT INTO services.service_roles (service_id, role_id) VALUES (p_service_id, p_role_id);
+    INSERT INTO auth.service_roles (service_id, role_id) VALUES (p_service_id, p_role_id);
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE services.remove_role_from_service(p_service_id INT, p_role_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.remove_role_from_service(p_service_id INT, p_role_id INT) AS $$
 BEGIN
-    DELETE FROM services.service_roles WHERE service_id = p_service_id AND role_id = p_role_id;
+    DELETE FROM auth.service_roles WHERE service_id = p_service_id AND role_id = p_role_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION services.list_service_roles(p_service_id INT)
+CREATE OR REPLACE FUNCTION auth.list_service_roles(p_service_id INT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.id, r.name FROM people.role r
-    JOIN services.service_roles sr ON r.id = sr.role_id
+    SELECT r.id, r.name FROM auth.role r
+    JOIN auth.service_roles sr ON r.id = sr.role_id
     WHERE sr.service_id = p_service_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.assign_role_to_person_in_service(p_person_id INT, p_service_id INT, p_role_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.assign_role_to_person_in_service(p_person_id INT, p_service_id INT, p_role_id INT) AS $$
 BEGIN
-    INSERT INTO people.person_service_role (person_id, service_id, role_id) VALUES (p_person_id, p_service_id, p_role_id);
+    INSERT INTO auth.person_service_role (person_id, service_id, role_id) VALUES (p_person_id, p_service_id, p_role_id);
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE PROCEDURE people.remove_role_from_person_in_service(p_person_id INT, p_service_id INT, p_role_id INT) AS $$
+CREATE OR REPLACE PROCEDURE auth.remove_role_from_person_in_service(p_person_id INT, p_service_id INT, p_role_id INT) AS $$
 BEGIN
-    DELETE FROM people.person_service_role
+    DELETE FROM auth.person_service_role
     WHERE person_id = p_person_id AND service_id = p_service_id AND role_id = p_role_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_person_roles_in_service(p_person_id INT, p_service_id INT)
+CREATE OR REPLACE FUNCTION auth.list_person_roles_in_service(p_person_id INT, p_service_id INT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.id, r.name FROM people.role r
-    JOIN people.person_service_role psr ON r.id = psr.role_id
+    SELECT r.id, r.name FROM auth.role r
+    JOIN auth.person_service_role psr ON r.id = psr.role_id
     WHERE psr.person_id = p_person_id AND psr.service_id = p_service_id;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_persons_with_role_in_service(p_service_id INT, p_role_id INT)
+CREATE OR REPLACE FUNCTION auth.list_persons_with_role_in_service(p_service_id INT, p_role_id INT)
 RETURNS TABLE(id INT, username TEXT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.id, p.username, p.name FROM people.person p
-    JOIN people.person_service_role psr ON p.id = psr.person_id
+    SELECT p.id, p.username, p.name FROM auth.person p
+    JOIN auth.person_service_role psr ON p.id = psr.person_id
     WHERE psr.service_id = p_service_id AND psr.role_id = p_role_id AND p.removed_at IS NULL;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.check_person_permission_in_service(p_person_id INT, p_service_id INT, p_permission_name TEXT)
+CREATE OR REPLACE FUNCTION auth.check_person_permission_in_service(p_person_id INT, p_service_id INT, p_permission_name TEXT)
 RETURNS BOOLEAN AS $$
 DECLARE
     has_permission BOOLEAN;
 BEGIN
     SELECT EXISTS (
         SELECT 1
-        FROM people.person_service_role psr
-        JOIN people.role_permission rp ON psr.role_id = rp.role_id
-        JOIN people.permission p ON rp.permission_id = p.id
+        FROM auth.person_service_role psr
+        JOIN auth.role_permission rp ON psr.role_id = rp.role_id
+        JOIN auth.permission p ON rp.permission_id = p.id
         WHERE psr.person_id = p_person_id
           AND psr.service_id = p_service_id
           AND p.name = p_permission_name
@@ -260,12 +260,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION people.list_services_of_person(p_person_id INT)
+CREATE OR REPLACE FUNCTION auth.list_services_of_person(p_person_id INT)
 RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT s.id, s.name FROM services.services s
-    JOIN people.person_service_role psr ON s.id = psr.service_id
+    SELECT s.id, s.name FROM auth.services s
+    JOIN auth.person_service_role psr ON s.id = psr.service_id
     WHERE psr.person_id = p_person_id AND s.status = TRUE;
 END;
 $$ LANGUAGE plpgsql;
