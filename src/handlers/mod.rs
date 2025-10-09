@@ -76,7 +76,12 @@ pub async fn create_user(req: &Request) -> Response {
 pub async fn list_people(_req: &Request) -> Response {
     let db = match DB::new().await {
         Ok(db) => db,
-        Err(_) => return error_response(StatusCode::InternalServerError, "Failed to connect to database"),
+        Err(e) => {
+            return error_response(
+                StatusCode::InternalServerError,
+                &format!("Failed to connect to database: {}", e),
+            )
+        }
     };
     match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_people()")
         .fetch_all(db.pool())
@@ -87,7 +92,9 @@ pub async fn list_people(_req: &Request) -> Response {
             content_type: "application/json".to_string(),
             content: serde_json::to_vec(&users).unwrap(),
         },
-        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch users"),
+        Err(e) => {
+            error_response(StatusCode::InternalServerError, &format!("Failed to fetch users: {}", e))
+        }
     }
 }
 
