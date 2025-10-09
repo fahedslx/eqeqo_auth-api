@@ -20,25 +20,20 @@ cd auth-api
 
 ### 2. Set up the database
 
-* Create a PostgreSQL database.
-* Run the SQL scripts located in the `/db` directory in order:
+*   Run the `run_all.sql` script located in the `/db` directory. This script will automatically create the database (named `auth_db`) and set up all the necessary tables and procedures.
 
-  1. `db/structure.sql` – creates the tables
-  2. `db/procedures.sql` – defines the functions and stored procedures
-
-Example (from terminal):
+Example (from your terminal, you might need to connect as a superuser like `postgres` initially):
 
 ```bash
-psql -U <user> -d <database_name> -f db/structure.sql
-psql -U <user> -d <database_name> -f db/procedures.sql
+psql -U <user> -f db/run_all.sql
 ```
 
 ### 3. Configure the environment
 
-Create a `.env` file in the root directory and add your PostgreSQL connection string:
+Create a `.env` file in the root directory and add your PostgreSQL connection string. Make sure the database name is `auth_db` as created by the script.
 
 ```env
-DATABASE_URL=postgres://USER:PASSWORD@HOST/DB_NAME
+DATABASE_URL=postgres://USER:PASSWORD@HOST/auth_db
 ```
 
 ### 4. Run the API server

@@ -1,12 +1,14 @@
 -- Main Schema for the Authentication and Authorization API
 
--- People Schema (Users)
--- Based on the user's provided schema, adapted for authentication.
+-- Schemas
 CREATE SCHEMA IF NOT EXISTS people;
+CREATE SCHEMA IF NOT EXISTS services;
 
+-- Custom Types
 CREATE TYPE people.document_type AS ENUM ('DNI', 'CE', 'RUC');
 CREATE TYPE people.person_type AS ENUM ('N', 'J');
 
+-- Tables
 CREATE TABLE people.person (
   id SERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE, -- Added for authentication
@@ -15,31 +17,26 @@ CREATE TABLE people.person (
   person_type people.person_type NOT NULL DEFAULT 'N',
   document_type people.document_type NOT NULL DEFAULT 'DNI',
   document_number TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  removed_at TIMESTAMPTZ,
+  created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
+  removed_at BIGINT,
   UNIQUE (document_type, document_number)
 );
 
--- Roles Schema (as provided by user)
 CREATE TABLE people.role (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
--- Permissions Schema (as provided by user)
 CREATE TABLE people.permission (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
--- Services Schema (new, as required by API)
-CREATE SCHEMA IF NOT EXISTS services;
-
 CREATE TABLE services.services (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   description TEXT,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
   status BOOLEAN NOT NULL DEFAULT TRUE
 );
 

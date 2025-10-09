@@ -57,7 +57,7 @@ $$ LANGUAGE plpgsql;
 CREATE OR REPLACE PROCEDURE people.delete_person(p_id INT) AS $$
 BEGIN
     UPDATE people.person
-    SET removed_at = NOW()
+    SET removed_at = EXTRACT(EPOCH FROM NOW())::BIGINT
     WHERE id = p_id;
 END;
 $$ LANGUAGE plpgsql;
