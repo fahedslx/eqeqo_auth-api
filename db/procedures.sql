@@ -64,26 +64,26 @@ $$ LANGUAGE plpgsql;
 
 -- Functions for Roles
 CREATE OR REPLACE FUNCTION people.create_role(p_name TEXT)
-RETURNS SETOF people.role AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO people.role (name) VALUES (p_name) RETURNING *;
+    INSERT INTO people.role (name) VALUES (p_name) RETURNING people.role.id, people.role.name;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION people.list_roles()
-RETURNS SETOF people.role AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT * FROM people.role;
+    SELECT r.id, r.name FROM people.role r;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION people.get_role(p_id INT)
-RETURNS SETOF people.role AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT * FROM people.role WHERE id = p_id;
+    SELECT r.id, r.name FROM people.role r WHERE r.id = p_id;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -102,18 +102,18 @@ $$ LANGUAGE plpgsql;
 
 -- Functions for Permissions
 CREATE OR REPLACE FUNCTION people.create_permission(p_name TEXT)
-RETURNS SETOF people.permission AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO people.permission (name) VALUES (p_name) RETURNING *;
+    INSERT INTO people.permission (name) VALUES (p_name) RETURNING people.permission.id, people.permission.name;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION people.list_permissions()
-RETURNS SETOF people.permission AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT * FROM people.permission;
+    SELECT p.id, p.name FROM people.permission p;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -131,18 +131,19 @@ $$ LANGUAGE plpgsql;
 
 -- Procedures for Services
 CREATE OR REPLACE FUNCTION services.create_service(p_name TEXT, p_description TEXT)
-RETURNS SETOF services.services AS $$
+RETURNS TABLE(id INT, name TEXT, description TEXT) AS $$
 BEGIN
     RETURN QUERY
-    INSERT INTO services.services (name, description) VALUES (p_name, p_description) RETURNING *;
+    INSERT INTO services.services (name, description) VALUES (p_name, p_description)
+    RETURNING services.services.id, services.services.name, services.services.description;
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION services.list_services()
-RETURNS SETOF services.services AS $$
+RETURNS TABLE(id INT, name TEXT, description TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT * FROM services.services WHERE status = TRUE;
+    SELECT s.id, s.name, s.description FROM services.services s WHERE s.status = TRUE;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -177,10 +178,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION people.list_role_permissions(p_role_id INT)
-RETURNS SETOF people.permission AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT p.* FROM people.permission p
+    SELECT p.id, p.name FROM people.permission p
     JOIN people.role_permission rp ON p.id = rp.permission_id
     WHERE rp.role_id = p_role_id;
 END;
@@ -199,10 +200,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION services.list_service_roles(p_service_id INT)
-RETURNS SETOF people.role AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.* FROM people.role r
+    SELECT r.id, r.name FROM people.role r
     JOIN services.service_roles sr ON r.id = sr.role_id
     WHERE sr.service_id = p_service_id;
 END;
@@ -222,10 +223,10 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION people.list_person_roles_in_service(p_person_id INT, p_service_id INT)
-RETURNS SETOF people.role AS $$
+RETURNS TABLE(id INT, name TEXT) AS $$
 BEGIN
     RETURN QUERY
-    SELECT r.* FROM people.role r
+    SELECT r.id, r.name FROM people.role r
     JOIN people.person_service_role psr ON r.id = psr.role_id
     WHERE psr.person_id = p_person_id AND psr.service_id = p_service_id;
 END;
