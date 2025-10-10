@@ -54,7 +54,7 @@ pub async fn create_user(req: &Request) -> Response {
     let document_type: people::DocumentType = serde_json::from_str(&format!("\"{}\"", payload.document_type)).unwrap_or(people::DocumentType::DNI);
 
     match sqlx::query_as::<_, User>(
-        "SELECT id, username, name FROM people.create_person($1, $2, $3, $4, $5, $6)")
+        "SELECT * FROM people.create_person($1, $2, $3, $4, $5, $6)")
         .bind(payload.username)
         .bind(payload.password_hash)
         .bind(payload.name)
@@ -83,7 +83,7 @@ pub async fn list_people(_req: &Request) -> Response {
             )
         }
     };
-    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_people()")
+    match sqlx::query_as::<_, User>("SELECT * FROM people.list_people()")
         .fetch_all(db.pool())
         .await
     {
@@ -107,7 +107,7 @@ pub async fn get_user(req: &Request) -> Response {
         Some(id) => id,
         None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
     };
-    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.get_person($1)")
+    match sqlx::query_as::<_, User>("SELECT * FROM people.get_person($1)")
         .bind(id)
         .fetch_optional(db.pool())
         .await
@@ -796,7 +796,7 @@ pub async fn list_persons_with_role_in_service(req: &Request) -> Response {
         Some(id) => id,
         None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
     };
-    match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_persons_with_role_in_service($1, $2)")
+    match sqlx::query_as::<_, User>("SELECT * FROM people.list_persons_with_role_in_service($1, $2)")
         .bind(service_id)
         .bind(role_id)
         .fetch_all(db.pool())
@@ -852,7 +852,8 @@ pub async fn list_services_of_person(req: &Request) -> Response {
         Some(id) => id,
         None => return error_response(StatusCode::BadRequest, "Invalid person ID"),
     };
-    match sqlx::query_as::<_, Service>("SELECT id, name, NULL as description FROM people.list_services_of_person($1)")
+    match sqlx::query_as::<_, Service>(
+        "SELECT s.id, s.name, NULL::TEXT AS description FROM people.list_services_of_person($1) AS s")
         .bind(person_id)
         .fetch_all(db.pool())
         .await
