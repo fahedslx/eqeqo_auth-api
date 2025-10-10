@@ -2,6 +2,9 @@ use crate::database::DB;
 use httpageboy::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Error;
+
+const PERSON_SCHEMAS: [&str; 2] = ["people", "auth"];
 
 // Generic response for errors
 fn error_response(status_code: StatusCode, message: &str) -> Response {
@@ -53,24 +56,50 @@ pub async fn create_user(req: &Request) -> Response {
     let person_type: people::PersonType = serde_json::from_str(&format!("\"{}\"", payload.person_type)).unwrap_or(people::PersonType::N);
     let document_type: people::DocumentType = serde_json::from_str(&format!("\"{}\"", payload.document_type)).unwrap_or(people::DocumentType::DNI);
 
-    match sqlx::query_as::<_, User>(
-        "SELECT * FROM people.create_person($1, $2, $3, $4, $5, $6)")
-        .bind(payload.username)
-        .bind(payload.password_hash)
-        .bind(payload.name)
-        .bind(person_type)
-        .bind(document_type)
-        .bind(payload.document_number)
-        .fetch_one(db.pool())
-        .await
-    {
-        Ok(user) => Response {
-            status: StatusCode::Created.to_string(),
-            content_type: "application/json".to_string(),
-            content: serde_json::to_vec(&user).unwrap(),
-        },
-        Err(_) => error_response(StatusCode::InternalServerError, "Failed to create user"),
+    let CreateUserPayload {
+        username,
+        password_hash,
+        name,
+        person_type: _,
+        document_type: _,
+        document_number,
+    } = payload;
+
+    let mut last_err: Option<Error> = None;
+    for schema in PERSON_SCHEMAS.iter() {
+        let sql = format!(
+            "SELECT * FROM {}.create_person($1, $2, $3, $4, $5, $6)",
+            schema
+        );
+        match sqlx::query_as::<_, User>(&sql)
+            .bind(&username)
+            .bind(&password_hash)
+            .bind(&name)
+            .bind(person_type)
+            .bind(document_type)
+            .bind(&document_number)
+            .fetch_one(db.pool())
+            .await
+        {
+            Ok(user) => {
+                return Response {
+                    status: StatusCode::Created.to_string(),
+                    content_type: "application/json".to_string(),
+                    content: serde_json::to_vec(&user).unwrap(),
+                }
+            }
+            Err(err) => last_err = Some(err),
+        }
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for create_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to create user: {}", detail),
+    )
 }
 
 pub async fn list_people(_req: &Request) -> Response {
@@ -83,19 +112,32 @@ pub async fn list_people(_req: &Request) -> Response {
             )
         }
     };
-    match sqlx::query_as::<_, User>("SELECT * FROM people.list_people()")
-        .fetch_all(db.pool())
-        .await
-    {
-        Ok(users) => Response {
-            status: StatusCode::Ok.to_string(),
-            content_type: "application/json".to_string(),
-            content: serde_json::to_vec(&users).unwrap(),
-        },
-        Err(e) => {
-            error_response(StatusCode::InternalServerError, &format!("Failed to fetch users: {}", e))
+    let mut last_err: Option<Error> = None;
+    for schema in PERSON_SCHEMAS.iter() {
+        let sql = format!("SELECT * FROM {}.list_people()", schema);
+        match sqlx::query_as::<_, User>(&sql)
+            .fetch_all(db.pool())
+            .await
+        {
+            Ok(users) => {
+                return Response {
+                    status: StatusCode::Ok.to_string(),
+                    content_type: "application/json".to_string(),
+                    content: serde_json::to_vec(&users).unwrap(),
+                }
+            }
+            Err(err) => last_err = Some(err),
         }
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for list_people".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to fetch users: {}", detail),
+    )
 }
 
 pub async fn get_user(req: &Request) -> Response {
@@ -107,19 +149,34 @@ pub async fn get_user(req: &Request) -> Response {
         Some(id) => id,
         None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
     };
-    match sqlx::query_as::<_, User>("SELECT * FROM people.get_person($1)")
-        .bind(id)
-        .fetch_optional(db.pool())
-        .await
-    {
-        Ok(Some(user)) => Response {
-            status: StatusCode::Ok.to_string(),
-            content_type: "application/json".to_string(),
-            content: serde_json::to_vec(&user).unwrap(),
-        },
-        Ok(None) => error_response(StatusCode::NotFound, "User not found"),
-        Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch user"),
+    let mut last_err: Option<Error> = None;
+    for schema in PERSON_SCHEMAS.iter() {
+        let sql = format!("SELECT * FROM {}.get_person($1)", schema);
+        match sqlx::query_as::<_, User>(&sql)
+            .bind(id)
+            .fetch_optional(db.pool())
+            .await
+        {
+            Ok(Some(user)) => {
+                return Response {
+                    status: StatusCode::Ok.to_string(),
+                    content_type: "application/json".to_string(),
+                    content: serde_json::to_vec(&user).unwrap(),
+                }
+            }
+            Ok(None) => return error_response(StatusCode::NotFound, "User not found"),
+            Err(err) => last_err = Some(err),
+        }
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for get_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to fetch user: {}", detail),
+    )
 }
 
 #[derive(Deserialize)]
@@ -142,21 +199,43 @@ pub async fn update_user(req: &Request) -> Response {
         Ok(p) => p,
         Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
     };
-    match sqlx::query("CALL people.update_person($1, $2, $3, $4)")
-        .bind(id)
-        .bind(payload.username)
-        .bind(payload.password_hash)
-        .bind(payload.name)
-        .execute(db.pool())
-        .await
-    {
-        Ok(_) => Response {
-            status: StatusCode::Ok.to_string(),
-            content_type: "application/json".to_string(),
-            content: json!({ "status": "success" }).to_string().into_bytes(),
-        },
-        Err(_) => error_response(StatusCode::InternalServerError, "Failed to update user"),
+
+    let UpdateUserPayload {
+        username,
+        password_hash,
+        name,
+    } = payload;
+
+    let mut last_err: Option<Error> = None;
+    for schema in PERSON_SCHEMAS.iter() {
+        let sql = format!("CALL {}.update_person($1, $2, $3, $4)", schema);
+        match sqlx::query(&sql)
+            .bind(id)
+            .bind(&username)
+            .bind(&password_hash)
+            .bind(&name)
+            .execute(db.pool())
+            .await
+        {
+            Ok(_) => {
+                return Response {
+                    status: StatusCode::Ok.to_string(),
+                    content_type: "application/json".to_string(),
+                    content: json!({ "status": "success" }).to_string().into_bytes(),
+                }
+            }
+            Err(err) => last_err = Some(err),
+        }
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for update_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to update user: {}", detail),
+    )
 }
 
 pub async fn delete_user(req: &Request) -> Response {
@@ -168,18 +247,33 @@ pub async fn delete_user(req: &Request) -> Response {
         Some(id) => id,
         None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
     };
-    match sqlx::query("CALL people.delete_person($1)")
-        .bind(id)
-        .execute(db.pool())
-        .await
-    {
-        Ok(_) => Response {
-            status: StatusCode::NoContent.to_string(),
-            content_type: "application/json".to_string(),
-            content: Vec::new(),
-        },
-        Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete user"),
+    let mut last_err: Option<Error> = None;
+    for schema in PERSON_SCHEMAS.iter() {
+        let sql = format!("CALL {}.delete_person($1)", schema);
+        match sqlx::query(&sql)
+            .bind(id)
+            .execute(db.pool())
+            .await
+        {
+            Ok(_) => {
+                return Response {
+                    status: StatusCode::NoContent.to_string(),
+                    content_type: "application/json".to_string(),
+                    content: Vec::new(),
+                }
+            }
+            Err(err) => last_err = Some(err),
+        }
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for delete_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to delete user: {}", detail),
+    )
 }
 
 
@@ -870,14 +964,14 @@ pub async fn list_services_of_person(req: &Request) -> Response {
 // These are needed for the create_person handler to deserialize the enums
 mod people {
     use serde::Deserialize;
-    #[derive(Debug, Deserialize, sqlx::Type)]
+    #[derive(Clone, Copy, Debug, Deserialize, sqlx::Type)]
     #[sqlx(type_name = "person_type", rename_all = "UPPERCASE")]
     pub enum PersonType {
         N,
         J,
     }
 
-    #[derive(Debug, Deserialize, sqlx::Type)]
+    #[derive(Clone, Copy, Debug, Deserialize, sqlx::Type)]
     #[sqlx(type_name = "document_type", rename_all = "UPPERCASE")]
     pub enum DocumentType {
         DNI,
