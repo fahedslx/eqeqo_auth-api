@@ -2,6 +2,9 @@ use crate::database::DB;
 use httpageboy::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Error;
+
+const PERSON_SCHEMAS: [&str; 2] = ["people", "auth"];
 
 // Generic response for errors
 fn error_response(status_code: StatusCode, message: &str) -> Response {
@@ -79,6 +82,15 @@ pub async fn create_user(req: &Request) -> Response {
         },
         Err(_) => error_response(StatusCode::InternalServerError, "Failed to create user"),
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for create_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to create user: {}", detail),
+    )
 }
 
 pub async fn list_people(_req: &Request) -> Response {
@@ -98,6 +110,15 @@ pub async fn list_people(_req: &Request) -> Response {
         },
         Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch users"),
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for list_people".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to fetch users: {}", detail),
+    )
 }
 
 pub async fn get_user(req: &Request) -> Response {
@@ -123,6 +144,15 @@ pub async fn get_user(req: &Request) -> Response {
         Ok(None) => error_response(StatusCode::NotFound, "User not found"),
         Err(_) => error_response(StatusCode::InternalServerError, "Failed to fetch user"),
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for get_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to fetch user: {}", detail),
+    )
 }
 
 #[derive(Deserialize)]
@@ -167,6 +197,15 @@ pub async fn update_user(req: &Request) -> Response {
         },
         Err(_) => error_response(StatusCode::InternalServerError, "Failed to update user"),
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for update_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to update user: {}", detail),
+    )
 }
 
 pub async fn delete_user(req: &Request) -> Response {
@@ -190,6 +229,15 @@ pub async fn delete_user(req: &Request) -> Response {
         },
         Err(_) => error_response(StatusCode::InternalServerError, "Failed to delete user"),
     }
+
+    let detail = last_err
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "no matching schema found for delete_person".to_string());
+
+    error_response(
+        StatusCode::InternalServerError,
+        &format!("Failed to delete user: {}", detail),
+    )
 }
 
 
