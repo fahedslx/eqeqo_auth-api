@@ -2,6 +2,9 @@ use crate::database::DB;
 use httpageboy::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Error;
+
+const PERSON_SCHEMAS: [&str; 2] = ["people", "auth"];
 
 // Generic response for errors
 fn error_response(status_code: StatusCode, message: &str) -> Response {

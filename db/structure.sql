@@ -1,6 +1,6 @@
 -- Main Schema for the Authentication and Authorization API
 
--- Schemas
+-- Schema
 CREATE SCHEMA IF NOT EXISTS auth;
 
 -- Custom Types
@@ -41,7 +41,7 @@ CREATE TABLE auth.services (
 
 -- Linking Tables
 
--- Role-Permissions (based on user schema, corrected reference)
+-- Role-Permissions
 CREATE TABLE auth.role_permission (
   id SERIAL PRIMARY KEY,
   role_id INTEGER REFERENCES auth.role(id) ON DELETE CASCADE NOT NULL,
@@ -49,7 +49,7 @@ CREATE TABLE auth.role_permission (
   UNIQUE (role_id, permission_id)
 );
 
--- Service-Roles (new, as required by API)
+-- Service-Roles (as required by API)
 CREATE TABLE auth.service_roles (
   id SERIAL PRIMARY KEY,
   service_id INTEGER REFERENCES auth.services(id) ON DELETE CASCADE NOT NULL,
@@ -57,7 +57,7 @@ CREATE TABLE auth.service_roles (
   UNIQUE (service_id, role_id)
 );
 
--- Person-Service-Roles (new, as required by API, replaces user's person_role)
+-- Person-Service-Roles (as required by API, replaces user's person_role)
 CREATE TABLE auth.person_service_role (
   id SERIAL PRIMARY KEY,
   person_id INTEGER REFERENCES auth.person(id) ON DELETE CASCADE NOT NULL,
