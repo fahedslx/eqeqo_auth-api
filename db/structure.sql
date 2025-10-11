@@ -1,38 +1,37 @@
 -- Main Schema for the Authentication and Authorization API
 
--- Schemas
-CREATE SCHEMA IF NOT EXISTS people;
-CREATE SCHEMA IF NOT EXISTS services;
+-- Schema
+CREATE SCHEMA IF NOT EXISTS auth;
 
 -- Custom Types
-CREATE TYPE people.document_type AS ENUM ('DNI', 'CE', 'RUC');
-CREATE TYPE people.person_type AS ENUM ('N', 'J');
+CREATE TYPE auth.document_type AS ENUM ('DNI', 'CE', 'RUC');
+CREATE TYPE auth.person_type AS ENUM ('N', 'J');
 
 -- Tables
-CREATE TABLE people.person (
+CREATE TABLE auth.person (
   id SERIAL PRIMARY KEY,
   username TEXT NOT NULL UNIQUE, -- Added for authentication
   password_hash TEXT NOT NULL, -- Added for authentication
   name TEXT NOT NULL,
-  person_type people.person_type NOT NULL DEFAULT 'N',
-  document_type people.document_type NOT NULL DEFAULT 'DNI',
+  person_type auth.person_type NOT NULL DEFAULT 'N',
+  document_type auth.document_type NOT NULL DEFAULT 'DNI',
   document_number TEXT NOT NULL,
   created_at BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT,
   removed_at BIGINT,
   UNIQUE (document_type, document_number)
 );
 
-CREATE TABLE people.role (
+CREATE TABLE auth.role (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE people.permission (
+CREATE TABLE auth.permission (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE
 );
 
-CREATE TABLE services.services (
+CREATE TABLE auth.services (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   description TEXT,
@@ -42,27 +41,27 @@ CREATE TABLE services.services (
 
 -- Linking Tables
 
--- Role-Permissions (based on user schema, corrected reference)
-CREATE TABLE people.role_permission (
+-- Role-Permissions
+CREATE TABLE auth.role_permission (
   id SERIAL PRIMARY KEY,
-  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
-  permission_id INTEGER REFERENCES people.permission(id) ON DELETE CASCADE NOT NULL,
+  role_id INTEGER REFERENCES auth.role(id) ON DELETE CASCADE NOT NULL,
+  permission_id INTEGER REFERENCES auth.permission(id) ON DELETE CASCADE NOT NULL,
   UNIQUE (role_id, permission_id)
 );
 
--- Service-Roles (new, as required by API)
-CREATE TABLE services.service_roles (
+-- Service-Roles (as required by API)
+CREATE TABLE auth.service_roles (
   id SERIAL PRIMARY KEY,
-  service_id INTEGER REFERENCES services.services(id) ON DELETE CASCADE NOT NULL,
-  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
+  service_id INTEGER REFERENCES auth.services(id) ON DELETE CASCADE NOT NULL,
+  role_id INTEGER REFERENCES auth.role(id) ON DELETE CASCADE NOT NULL,
   UNIQUE (service_id, role_id)
 );
 
--- Person-Service-Roles (new, as required by API, replaces user's person_role)
-CREATE TABLE people.person_service_role (
+-- Person-Service-Roles (as required by API, replaces user's person_role)
+CREATE TABLE auth.person_service_role (
   id SERIAL PRIMARY KEY,
-  person_id INTEGER REFERENCES people.person(id) ON DELETE CASCADE NOT NULL,
-  service_id INTEGER REFERENCES services.services(id) ON DELETE CASCADE NOT NULL,
-  role_id INTEGER REFERENCES people.role(id) ON DELETE CASCADE NOT NULL,
+  person_id INTEGER REFERENCES auth.person(id) ON DELETE CASCADE NOT NULL,
+  service_id INTEGER REFERENCES auth.services(id) ON DELETE CASCADE NOT NULL,
+  role_id INTEGER REFERENCES auth.role(id) ON DELETE CASCADE NOT NULL,
   UNIQUE (person_id, service_id, role_id)
 );
