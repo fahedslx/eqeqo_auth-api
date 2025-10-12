@@ -9,7 +9,7 @@ pub struct DB {
 impl DB {
   /// Create a pooled Postgres connection
   pub async fn new() -> Result<Self, sqlx::Error> {
-    // Fallback: intenta cargar .env si aún no se cargó
+    // Fallback: try to load .env if it has not been loaded yet
     let _ = dotenvy::dotenv();
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
