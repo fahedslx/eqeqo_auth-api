@@ -2,9 +2,6 @@ use crate::database::DB;
 use httpageboy::{Request, Response, StatusCode};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sqlx::Error;
-
-const PERSON_SCHEMAS: [&str; 2] = ["people", "auth"];
 
 // Generic response for errors
 fn error_response(status_code: StatusCode, message: &str) -> Response {
@@ -58,14 +55,15 @@ pub async fn create_user(req: &Request) -> Response {
   };
 
   // Note: In a real app, you'd want to handle these enums more gracefully.
-  let person_type: people::PersonType =
-    serde_json::from_str(&format!("\"{}\"", payload.person_type)).unwrap_or(people::PersonType::N);
-  let document_type: people::DocumentType =
+  let person_type: auth_types::PersonType =
+    serde_json::from_str(&format!("\"{}\"", payload.person_type))
+      .unwrap_or(auth_types::PersonType::N);
+  let document_type: auth_types::DocumentType =
     serde_json::from_str(&format!("\"{}\"", payload.document_type))
-      .unwrap_or(people::DocumentType::DNI);
+      .unwrap_or(auth_types::DocumentType::DNI);
 
   match sqlx::query_as::<_, User>(
-    "SELECT id, username, name FROM people.create_person($1, $2, $3, $4, $5, $6)",
+    "SELECT id, username, name FROM auth.create_person($1, $2, $3, $4, $5, $6)",
   )
   .bind(payload.username)
   .bind(payload.password_hash)
@@ -95,7 +93,7 @@ pub async fn list_people(_req: &Request) -> Response {
       );
     }
   };
-  match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.list_people()")
+  match sqlx::query_as::<_, User>("SELECT id, username, name FROM auth.list_people()")
     .fetch_all(db.pool())
     .await
   {
@@ -122,7 +120,7 @@ pub async fn get_user(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
   };
-  match sqlx::query_as::<_, User>("SELECT id, username, name FROM people.get_person($1)")
+  match sqlx::query_as::<_, User>("SELECT id, username, name FROM auth.get_person($1)")
     .bind(id)
     .fetch_optional(db.pool())
     .await
@@ -162,7 +160,7 @@ pub async fn update_user(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.update_person($1, $2, $3, $4)")
+  match sqlx::query("CALL auth.update_person($1, $2, $3, $4)")
     .bind(id)
     .bind(payload.username)
     .bind(payload.password_hash)
@@ -193,7 +191,7 @@ pub async fn delete_user(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid user ID"),
   };
-  match sqlx::query("CALL people.delete_person($1)")
+  match sqlx::query("CALL auth.delete_person($1)")
     .bind(id)
     .execute(db.pool())
     .await
@@ -367,7 +365,7 @@ pub async fn create_role(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query_as::<_, Role>("SELECT * FROM people.create_role($1)")
+  match sqlx::query_as::<_, Role>("SELECT * FROM auth.create_role($1)")
     .bind(payload.name)
     .fetch_one(db.pool())
     .await
@@ -391,7 +389,7 @@ pub async fn list_roles(_req: &Request) -> Response {
       );
     }
   };
-  match sqlx::query_as::<_, Role>("SELECT * FROM people.list_roles()")
+  match sqlx::query_as::<_, Role>("SELECT * FROM auth.list_roles()")
     .fetch_all(db.pool())
     .await
   {
@@ -418,7 +416,7 @@ pub async fn get_role(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
   };
-  match sqlx::query_as::<_, Role>("SELECT * FROM people.get_role($1)")
+  match sqlx::query_as::<_, Role>("SELECT * FROM auth.get_role($1)")
     .bind(id)
     .fetch_optional(db.pool())
     .await
@@ -456,7 +454,7 @@ pub async fn update_role(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.update_role($1, $2)")
+  match sqlx::query("CALL auth.update_role($1, $2)")
     .bind(id)
     .bind(payload.name)
     .execute(db.pool())
@@ -485,7 +483,7 @@ pub async fn delete_role(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
   };
-  match sqlx::query("CALL people.delete_role($1)")
+  match sqlx::query("CALL auth.delete_role($1)")
     .bind(id)
     .execute(db.pool())
     .await
@@ -525,7 +523,7 @@ pub async fn create_permission(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query_as::<_, Permission>("SELECT * FROM people.create_permission($1)")
+  match sqlx::query_as::<_, Permission>("SELECT * FROM auth.create_permission($1)")
     .bind(payload.name)
     .fetch_one(db.pool())
     .await
@@ -552,7 +550,7 @@ pub async fn list_permissions(_req: &Request) -> Response {
       );
     }
   };
-  match sqlx::query_as::<_, Permission>("SELECT * FROM people.list_permissions()")
+  match sqlx::query_as::<_, Permission>("SELECT * FROM auth.list_permissions()")
     .fetch_all(db.pool())
     .await
   {
@@ -591,7 +589,7 @@ pub async fn update_permission(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.update_permission($1, $2)")
+  match sqlx::query("CALL auth.update_permission($1, $2)")
     .bind(id)
     .bind(payload.name)
     .execute(db.pool())
@@ -623,7 +621,7 @@ pub async fn delete_permission(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid permission ID"),
   };
-  match sqlx::query("CALL people.delete_permission($1)")
+  match sqlx::query("CALL auth.delete_permission($1)")
     .bind(id)
     .execute(db.pool())
     .await
@@ -661,7 +659,7 @@ pub async fn assign_permission_to_role(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.assign_permission_to_role($1, $2)")
+  match sqlx::query("CALL auth.assign_permission_to_role($1, $2)")
     .bind(payload.role_id)
     .bind(payload.permission_id)
     .execute(db.pool())
@@ -693,7 +691,7 @@ pub async fn remove_permission_from_role(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.remove_permission_from_role($1, $2)")
+  match sqlx::query("CALL auth.remove_permission_from_role($1, $2)")
     .bind(payload.role_id)
     .bind(payload.permission_id)
     .execute(db.pool())
@@ -725,7 +723,7 @@ pub async fn list_role_permissions(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
   };
-  match sqlx::query_as::<_, Permission>("SELECT * FROM people.list_role_permissions($1)")
+  match sqlx::query_as::<_, Permission>("SELECT * FROM auth.list_role_permissions($1)")
     .bind(id)
     .fetch_all(db.pool())
     .await
@@ -864,7 +862,7 @@ pub async fn assign_role_to_person_in_service(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.assign_role_to_person_in_service($1, $2, $3)")
+  match sqlx::query("CALL auth.assign_role_to_person_in_service($1, $2, $3)")
     .bind(payload.person_id)
     .bind(payload.service_id)
     .bind(payload.role_id)
@@ -897,7 +895,7 @@ pub async fn remove_role_from_person_in_service(req: &Request) -> Response {
     Ok(p) => p,
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
-  match sqlx::query("CALL people.remove_role_from_person_in_service($1, $2, $3)")
+  match sqlx::query("CALL auth.remove_role_from_person_in_service($1, $2, $3)")
     .bind(payload.person_id)
     .bind(payload.service_id)
     .bind(payload.role_id)
@@ -934,7 +932,7 @@ pub async fn list_person_roles_in_service(req: &Request) -> Response {
     Some(id) => id,
     None => return error_response(StatusCode::BadRequest, "Invalid service ID"),
   };
-  match sqlx::query_as::<_, Role>("SELECT * FROM people.list_person_roles_in_service($1, $2)")
+  match sqlx::query_as::<_, Role>("SELECT * FROM auth.list_person_roles_in_service($1, $2)")
     .bind(person_id)
     .bind(service_id)
     .fetch_all(db.pool())
@@ -971,7 +969,7 @@ pub async fn list_persons_with_role_in_service(req: &Request) -> Response {
     None => return error_response(StatusCode::BadRequest, "Invalid role ID"),
   };
   match sqlx::query_as::<_, User>(
-    "SELECT id, username, name FROM people.list_persons_with_role_in_service($1, $2)",
+    "SELECT id, username, name FROM auth.list_persons_with_role_in_service($1, $2)",
   )
   .bind(service_id)
   .bind(role_id)
@@ -1012,7 +1010,7 @@ pub async fn check_person_permission_in_service(req: &Request) -> Response {
     Err(_) => return error_response(StatusCode::BadRequest, "Invalid request body"),
   };
   match sqlx::query_scalar::<_, bool>(
-    "SELECT * FROM people.check_person_permission_in_service($1, $2, $3)",
+    "SELECT * FROM auth.check_person_permission_in_service($1, $2, $3)",
   )
   .bind(payload.person_id)
   .bind(payload.service_id)
@@ -1049,7 +1047,7 @@ pub async fn list_services_of_person(req: &Request) -> Response {
     None => return error_response(StatusCode::BadRequest, "Invalid person ID"),
   };
   match sqlx::query_as::<_, Service>(
-    "SELECT id, name, NULL as description FROM people.list_services_of_person($1)",
+    "SELECT id, name, NULL as description FROM auth.list_services_of_person($1)",
   )
   .bind(person_id)
   .fetch_all(db.pool())
@@ -1068,7 +1066,7 @@ pub async fn list_services_of_person(req: &Request) -> Response {
 }
 
 // These are needed for the create_person handler to deserialize the enums
-mod people {
+mod auth_types {
   use serde::Deserialize;
   #[derive(Debug, Deserialize, sqlx::Type)]
   #[sqlx(type_name = "person_type", rename_all = "UPPERCASE")]

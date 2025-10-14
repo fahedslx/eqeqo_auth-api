@@ -1,9 +1,6 @@
 -- Demo seed data for the auth API database.
 -- All inserts use ON CONFLICT safeguards so the script can be run multiple times.
 
-<<<<<<< HEAD
-INSERT INTO auth.roles (name)
-=======
 \set ON_ERROR_STOP on
 
 -- Services
@@ -16,7 +13,6 @@ ON CONFLICT (name) DO NOTHING;
 
 -- Roles
 INSERT INTO auth.role (name)
->>>>>>> ca640723e8902af520af44b568c3c8ce85fb9016
 VALUES
   ('Admin'),
   ('User'),
@@ -24,12 +20,8 @@ VALUES
   ('Viewer')
 ON CONFLICT (name) DO NOTHING;
 
-<<<<<<< HEAD
-INSERT INTO auth.permissions (name)
-=======
 -- Permissions
 INSERT INTO auth.permission (name)
->>>>>>> ca640723e8902af520af44b568c3c8ce85fb9016
 VALUES
   ('read'),
   ('write'),
@@ -38,9 +30,6 @@ VALUES
   ('share')
 ON CONFLICT (name) DO NOTHING;
 
-<<<<<<< HEAD
-INSERT INTO auth.people (username, password_hash)
-=======
 -- People
 INSERT INTO auth.person (
   username,
@@ -50,7 +39,6 @@ INSERT INTO auth.person (
   document_type,
   document_number
 )
->>>>>>> ca640723e8902af520af44b568c3c8ce85fb9016
 VALUES
   ('adm1', 'adm1-hash', 'Admin One', 'N', 'DNI', '00000001'),
   ('usr1', 'usr1-hash', 'User One', 'N', 'DNI', '00000002'),
@@ -60,31 +48,6 @@ VALUES
   ('viewer1', 'viewer1-hash', 'Viewer One', 'N', 'DNI', '00000006')
 ON CONFLICT (username) DO NOTHING;
 
-<<<<<<< HEAD
-INSERT INTO auth.role_permissions (role_id, permission_id)
-VALUES
-  (1, 1),
-  (1, 2),
-  (1, 3),
-  (1, 4),
-  (2, 1),
-  (3, 5),
-  (4, 6);
-
-INSERT INTO auth.service_roles (service_id, role_id)
-VALUES
-  (1, 1),
-  (1, 2),
-  (2, 2),
-  (3, 3);
-
-INSERT INTO auth.person_service_roles (person_id, service_id, role_id)
-VALUES
-  (1, 1, 1),
-  (2, 1, 2),
-  (3, 2, 2),
-  (4, 3, 3);
-=======
 -- Role permissions
 WITH role_permission_pairs (role_name, permission_name) AS (
   VALUES
@@ -133,4 +96,3 @@ JOIN auth.person pe ON pe.username = psr.username
 JOIN auth.services s ON s.name = psr.service_name
 JOIN auth.role r ON r.name = psr.role_name
 ON CONFLICT (person_id, service_id, role_id) DO NOTHING;
->>>>>>> ca640723e8902af520af44b568c3c8ce85fb9016
